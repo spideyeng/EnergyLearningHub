@@ -169,7 +169,7 @@ def initialize_pipeline():
         from langchain_chroma import Chroma
 
         embeddings = GoogleGenerativeAIEmbeddings(
-            model="models/embedding-001",
+            model="models/gemini-embedding-001",
             google_api_key=GEMINI_KEY
         )
         vector_store = Chroma.from_documents(
