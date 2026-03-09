@@ -1,6 +1,6 @@
 langchain>=0.3.14
 langchain-community>=0.3.14
-langchain-huggingface>=0.1.2
+langchain-openai>=0.3.0
 langchain-chroma>=0.2.2
 langchain-google-genai>=2.1.0
 chromadb>=0.5.23

@@ -25,7 +25,6 @@ PORT = int(os.environ.get("PORT", 10000))  # Render default is 10000
 
 GEMINI_KEY = os.environ.get("GEMINI_API_KEY", "")
 HF_TOKEN = os.environ.get("HF_TOKEN", "")
-os.environ["HUGGINGFACEHUB_API_TOKEN"] = HF_TOKEN
 
 # ╔══════════════════════════════════════════════════════════════╗
 # ║  2. GLOBAL STATE — populated by background thread           ║
@@ -161,7 +160,7 @@ def initialize_pipeline():
 
         print(f"🧩 Total chunks: {total_chunks}")
 
-        # --- Embeddings + Vector Store ---
+        # --- Embeddings + Vector Store (batched to respect API rate limits) ---
         pipeline_status = "Building vector store (using Gemini embeddings API)..."
         print("🔧 Configuring Gemini embedding model (API-based, no local PyTorch)...")
 
@@ -172,12 +171,36 @@ def initialize_pipeline():
             model="models/gemini-embedding-001",
             google_api_key=GEMINI_KEY
         )
-        vector_store = Chroma.from_documents(
-            documents=chunks,
-            collection_name="energy_hub",
-            embedding=embeddings,
-            persist_directory=CHROMA_DIR
-        )
+
+        # Batch embedding: free tier = 100 requests/min.
+        # Process in batches of 80 with a 60s pause between batches.
+        BATCH_SIZE = 80
+        num_batches = (len(chunks) + BATCH_SIZE - 1) // BATCH_SIZE
+        vector_store = None
+
+        for i in range(0, len(chunks), BATCH_SIZE):
+            batch_num = i // BATCH_SIZE + 1
+            batch = chunks[i : i + BATCH_SIZE]
+            pipeline_status = f"Embedding batch {batch_num}/{num_batches} ({len(batch)} chunks)..."
+            print(f"📦 Embedding batch {batch_num}/{num_batches} ({len(batch)} chunks)...")
+
+            if vector_store is None:
+                # First batch: create the vector store
+                vector_store = Chroma.from_documents(
+                    documents=batch,
+                    collection_name="energy_hub",
+                    embedding=embeddings,
+                    persist_directory=CHROMA_DIR
+                )
+            else:
+                # Subsequent batches: add to existing store
+                vector_store.add_documents(batch)
+
+            # Rate-limit pause (skip after last batch)
+            if i + BATCH_SIZE < len(chunks):
+                print(f"⏳ Pausing 60s for rate limit...")
+                time.sleep(60)
+
         total_vectors = vector_store._collection.count()
         print(f"✅ Vector store: {total_vectors} vectors")
 
@@ -186,20 +209,23 @@ def initialize_pipeline():
         print("🤖 Configuring LLMs...")
 
         from langchain_google_genai import ChatGoogleGenerativeAI
-        from langchain_huggingface import ChatHuggingFace, HuggingFaceEndpoint
+        from langchain_openai import ChatOpenAI
 
         gemini_llm = ChatGoogleGenerativeAI(
             model="gemini-2.5-flash",
             temperature=0.1,
             google_api_key=GEMINI_KEY
         )
-        qwen_endpoint = HuggingFaceEndpoint(
-            repo_id="Qwen/Qwen2.5-7B-Instruct",
-            task="text-generation",
-            max_new_tokens=1024,
-            temperature=0.1
+
+        # Qwen via HuggingFace's OpenAI-compatible Inference API
+        # (no torch/transformers needed — just an HTTP call)
+        qwen_llm = ChatOpenAI(
+            model="Qwen/Qwen2.5-7B-Instruct",
+            base_url="https://api-inference.huggingface.co/v1/",
+            api_key=HF_TOKEN,
+            temperature=0.1,
+            max_tokens=1024,
         )
-        qwen_llm = ChatHuggingFace(llm=qwen_endpoint)
         llm_with_fallback = gemini_llm.with_fallbacks([qwen_llm])
 
         # --- RAG Chain ---
