@@ -79,7 +79,7 @@ Click **Create Web Service**. Render will:
 
 Once complete, your app is live at:
 ```
-https://energy-learning-hub.onrender.com
+https://energylearninghub.onrender.com
 ```
 
 ---
@@ -87,7 +87,7 @@ https://energy-learning-hub.onrender.com
 ## Project Structure
 
 ```
-energy-learning-hub/
+energylearninghub/
 ├── app.py              ← Main application (RAG + Gradio UI)
 ├── requirements.txt    ← Python dependencies
 ├── Dockerfile          ← Container build instructions
