@@ -1,0 +1,22 @@
+# render.yaml — Render Blueprint Spec
+# https://render.com/docs/blueprint-spec
+
+services:
+  - type: web
+    name: energy-learning-hub
+    runtime: docker
+    plan: starter           # $7/mo — free tier spins down after 15min inactivity
+    region: singapore       # Closest to your location
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false         # Prompts you to enter during deploy
+      - key: HF_TOKEN
+        sync: false
+      - key: PDF_DIR
+        value: ./data
+      - key: CHROMA_DIR
+        value: ./chroma_db
+    disk:
+      name: energy-hub-data
+      mountPath: /app/chroma_db
+      sizeGB: 1             # Persistent storage for vector DB
