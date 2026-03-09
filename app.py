@@ -5,6 +5,8 @@ Fixed for Render deployment:
   - Binds to PORT immediately (Render default: 10000)
   - Loads RAG pipeline in background thread after server starts
   - Shows loading state in UI until pipeline is ready
+  - Uses API-based embeddings (Gemini) to avoid loading PyTorch locally
+  - Frees intermediate data after pipeline init to reduce memory footprint
 """
 
 import os
@@ -160,13 +162,16 @@ def initialize_pipeline():
         print(f"🧩 Total chunks: {total_chunks}")
 
         # --- Embeddings + Vector Store ---
-        pipeline_status = "Building vector store (downloading embedding model)..."
-        print("🔧 Loading embedding model...")
+        pipeline_status = "Building vector store (using Gemini embeddings API)..."
+        print("🔧 Configuring Gemini embedding model (API-based, no local PyTorch)...")
 
-        from langchain_huggingface import HuggingFaceEmbeddings
+        from langchain_google_genai import GoogleGenerativeAIEmbeddings
         from langchain_chroma import Chroma
 
-        embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+        embeddings = GoogleGenerativeAIEmbeddings(
+            model="models/embedding-001",
+            google_api_key=GEMINI_KEY
+        )
         vector_store = Chroma.from_documents(
             documents=chunks,
             collection_name="energy_hub",
@@ -235,6 +240,13 @@ Question: {question}
         pipeline_ready = True
         pipeline_status = "Ready"
         print("✅ Pipeline ready! Server is live.")
+
+        # --- Free intermediate data to reduce memory footprint ---
+        del all_docs
+        del chunks
+        import gc
+        gc.collect()
+        print("🧹 Freed intermediate data (docs/chunks) from memory.")
 
     except Exception as e:
         pipeline_status = f"Error: {str(e)}"
