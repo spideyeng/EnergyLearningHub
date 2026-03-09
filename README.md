@@ -34,7 +34,7 @@ cp ~/your-pdfs/*.pdf data/
 git add .
 git commit -m "Initial commit — Energy Learning Hub"
 git branch -M main
-git remote add origin https://github.com/YOUR_USERNAME/energy-learning-hub.git
+git remote add origin https://github.com/YOUR_USERNAME/EnergyLearningHub.git
 git push -u origin main
 ```
 
@@ -43,12 +43,12 @@ git push -u origin main
 1. Go to [render.com/dashboard](https://dashboard.render.com)
 2. Click **New** → **Web Service**
 3. Select **Build and deploy from a Git repository** → click **Next**
-4. Connect your GitHub account and select your `energy-learning-hub` repo
+4. Connect your GitHub account and select your `energylearninghub` repo
 5. Configure the service:
 
 | Setting          | Value                             |
 |------------------|-----------------------------------|
-| **Name**         | `energy-learning-hub`             |
+| **Name**         | `energylearninghub`             |
 | **Region**       | Singapore (closest to you)        |
 | **Branch**       | `main`                            |
 | **Runtime**      | Docker                            |
