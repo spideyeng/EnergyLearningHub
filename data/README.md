@@ -1,3 +1,1 @@
-Place your energy PDF files in this directory.
-
-They will be loaded, chunked, and indexed at startup.
+Place your energy PDF files (e.g., Oil-101-Morgan-Downey.pdf) here.

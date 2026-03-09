@@ -3,6 +3,4 @@ __pycache__/
 .env
 chroma_db/
 *.egg-info/
-dist/
-build/
 .ipynb_checkpoints/
