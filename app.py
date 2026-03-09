@@ -115,55 +115,6 @@ def initialize_pipeline():
     global ingestion_log, first_chunk_previews, total_chunks, total_vectors
 
     try:
-        # --- Load PDFs ---
-        pipeline_status = "Loading PDFs..."
-        print("📖 Loading PDFs from:", PDF_DIR)
-
-        from langchain_community.document_loaders import PyPDFLoader
-        from langchain_text_splitters import RecursiveCharacterTextSplitter
-
-        pdf_files = glob.glob(os.path.join(PDF_DIR, "**/*.pdf"), recursive=True)
-        all_docs = []
-
-        for pdf_path in sorted(pdf_files):
-            filename = os.path.basename(pdf_path)
-            filesize_kb = os.path.getsize(pdf_path) / 1024
-            filesize_mb = filesize_kb / 1024
-            try:
-                loader = PyPDFLoader(pdf_path)
-                pages = loader.load()
-                for page in pages:
-                    page.metadata["source_file"] = filename
-                    page.metadata["page_number"] = page.metadata.get("page", "N/A")
-                    first_line = page.page_content.strip().split("\n")[0][:100]
-                    if any(kw in first_line.lower() for kw in ["chapter", "part", "section", "appendix"]):
-                        page.metadata["chapter"] = first_line
-                    else:
-                        page.metadata["chapter"] = "N/A"
-                all_docs.extend(pages)
-                ingestion_log.append({"filename": filename, "filesize": f"{filesize_mb:.2f} MB" if filesize_mb >= 1 else f"{filesize_kb:.1f} KB", "pages": len(pages), "status": "✅ Loaded"})
-                print(f"  ✅ {filename}: {len(pages)} pages")
-            except Exception as e:
-                ingestion_log.append({"filename": filename, "filesize": "?", "pages": 0, "status": f"❌ {e}"})
-                print(f"  ❌ {filename}: {e}")
-
-        # --- Chunk ---
-        pipeline_status = "Chunking documents..."
-        splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=100, separators=["\n\n", "\n", ". ", " ", ""])
-        chunks = splitter.split_documents(all_docs)
-        total_chunks = len(chunks)
-
-        for chunk in chunks:
-            src = chunk.metadata.get("source_file", "unknown")
-            if src not in first_chunk_previews:
-                first_chunk_previews[src] = chunk.page_content[:300]
-
-        print(f"🧩 Total chunks: {total_chunks}")
-
-        # --- Embeddings + Vector Store (batched to respect API rate limits) ---
-        pipeline_status = "Building vector store (using Gemini embeddings API)..."
-        print("🔧 Configuring Gemini embedding model (API-based, no local PyTorch)...")
-
         from langchain_google_genai import GoogleGenerativeAIEmbeddings
         from langchain_chroma import Chroma
 
@@ -172,34 +123,118 @@ def initialize_pipeline():
             google_api_key=GEMINI_KEY
         )
 
-        # Batch embedding: free tier = 100 requests/min.
-        # Process in batches of 80 with a 60s pause between batches.
-        BATCH_SIZE = 80
-        num_batches = (len(chunks) + BATCH_SIZE - 1) // BATCH_SIZE
+        # --- Try loading existing vector store from disk first ---
         vector_store = None
-
-        for i in range(0, len(chunks), BATCH_SIZE):
-            batch_num = i // BATCH_SIZE + 1
-            batch = chunks[i : i + BATCH_SIZE]
-            pipeline_status = f"Embedding batch {batch_num}/{num_batches} ({len(batch)} chunks)..."
-            print(f"📦 Embedding batch {batch_num}/{num_batches} ({len(batch)} chunks)...")
-
-            if vector_store is None:
-                # First batch: create the vector store
-                vector_store = Chroma.from_documents(
-                    documents=batch,
+        if os.path.isdir(CHROMA_DIR) and os.listdir(CHROMA_DIR):
+            pipeline_status = "Loading existing vector store from disk..."
+            print("💾 Found existing ChromaDB on disk, loading...")
+            try:
+                vector_store = Chroma(
                     collection_name="energy_hub",
-                    embedding=embeddings,
+                    embedding_function=embeddings,
                     persist_directory=CHROMA_DIR
                 )
-            else:
-                # Subsequent batches: add to existing store
-                vector_store.add_documents(batch)
+                existing_count = vector_store._collection.count()
+                if existing_count > 0:
+                    total_vectors = existing_count
+                    print(f"✅ Loaded existing vector store: {total_vectors} vectors (skipping re-embedding)")
+                else:
+                    vector_store = None  # Empty store, rebuild
+                    print("⚠️ Existing store is empty, will rebuild...")
+            except Exception as e:
+                vector_store = None
+                print(f"⚠️ Could not load existing store ({e}), will rebuild...")
 
-            # Rate-limit pause (skip after last batch)
-            if i + BATCH_SIZE < len(chunks):
-                print(f"⏳ Pausing 60s for rate limit...")
-                time.sleep(60)
+        # --- Build vector store from PDFs if not loaded from disk ---
+        if vector_store is None:
+            pipeline_status = "Loading PDFs..."
+            print("📖 Loading PDFs from:", PDF_DIR)
+
+            from langchain_community.document_loaders import PyPDFLoader
+            from langchain_text_splitters import RecursiveCharacterTextSplitter
+
+            pdf_files = glob.glob(os.path.join(PDF_DIR, "**/*.pdf"), recursive=True)
+            all_docs = []
+
+            for pdf_path in sorted(pdf_files):
+                filename = os.path.basename(pdf_path)
+                filesize_kb = os.path.getsize(pdf_path) / 1024
+                filesize_mb = filesize_kb / 1024
+                try:
+                    loader = PyPDFLoader(pdf_path)
+                    pages = loader.load()
+                    for page in pages:
+                        page.metadata["source_file"] = filename
+                        page.metadata["page_number"] = page.metadata.get("page", "N/A")
+                        first_line = page.page_content.strip().split("\n")[0][:100]
+                        if any(kw in first_line.lower() for kw in ["chapter", "part", "section", "appendix"]):
+                            page.metadata["chapter"] = first_line
+                        else:
+                            page.metadata["chapter"] = "N/A"
+                    all_docs.extend(pages)
+                    ingestion_log.append({"filename": filename, "filesize": f"{filesize_mb:.2f} MB" if filesize_mb >= 1 else f"{filesize_kb:.1f} KB", "pages": len(pages), "status": "✅ Loaded"})
+                    print(f"  ✅ {filename}: {len(pages)} pages")
+                except Exception as e:
+                    ingestion_log.append({"filename": filename, "filesize": "?", "pages": 0, "status": f"❌ {e}"})
+                    print(f"  ❌ {filename}: {e}")
+
+            # --- Chunk (larger chunks = fewer API calls) ---
+            pipeline_status = "Chunking documents..."
+            splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200, separators=["\n\n", "\n", ". ", " ", ""])
+            chunks = splitter.split_documents(all_docs)
+            total_chunks = len(chunks)
+
+            for chunk in chunks:
+                src = chunk.metadata.get("source_file", "unknown")
+                if src not in first_chunk_previews:
+                    first_chunk_previews[src] = chunk.page_content[:300]
+
+            print(f"🧩 Total chunks: {total_chunks}")
+
+            # --- Batched embedding with retry (free tier: 100/min, 1000/day) ---
+            pipeline_status = "Embedding chunks..."
+            BATCH_SIZE = 80
+            num_batches = (len(chunks) + BATCH_SIZE - 1) // BATCH_SIZE
+
+            for i in range(0, len(chunks), BATCH_SIZE):
+                batch_num = i // BATCH_SIZE + 1
+                batch = chunks[i : i + BATCH_SIZE]
+                pipeline_status = f"Embedding batch {batch_num}/{num_batches} ({len(batch)} chunks)..."
+                print(f"📦 Embedding batch {batch_num}/{num_batches} ({len(batch)} chunks)...")
+
+                # Retry with exponential backoff for rate limits
+                for attempt in range(5):
+                    try:
+                        if vector_store is None:
+                            vector_store = Chroma.from_documents(
+                                documents=batch,
+                                collection_name="energy_hub",
+                                embedding=embeddings,
+                                persist_directory=CHROMA_DIR
+                            )
+                        else:
+                            vector_store.add_documents(batch)
+                        break  # Success
+                    except Exception as e:
+                        if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
+                            wait = 60 * (2 ** attempt)  # 60s, 120s, 240s, ...
+                            print(f"⚠️ Rate limited, retrying in {wait}s (attempt {attempt + 1}/5)...")
+                            pipeline_status = f"Rate limited — retrying batch {batch_num} in {wait}s..."
+                            time.sleep(wait)
+                        else:
+                            raise
+
+                # Rate-limit pause between batches (skip after last)
+                if i + BATCH_SIZE < len(chunks):
+                    print(f"⏳ Pausing 60s for rate limit...")
+                    time.sleep(60)
+
+            # Free intermediate data
+            del all_docs
+            del chunks
+            import gc
+            gc.collect()
+            print("🧹 Freed intermediate data from memory.")
 
         total_vectors = vector_store._collection.count()
         print(f"✅ Vector store: {total_vectors} vectors")
@@ -266,13 +301,6 @@ Question: {question}
         pipeline_ready = True
         pipeline_status = "Ready"
         print("✅ Pipeline ready! Server is live.")
-
-        # --- Free intermediate data to reduce memory footprint ---
-        del all_docs
-        del chunks
-        import gc
-        gc.collect()
-        print("🧹 Freed intermediate data (docs/chunks) from memory.")
 
     except Exception as e:
         pipeline_status = f"Error: {str(e)}"
@@ -378,7 +406,7 @@ def query_hub(user_query, selected_level):
 # ╔══════════════════════════════════════════════════════════════╗
 # ║  6. GRADIO UI — Launches IMMEDIATELY to bind the port       ║
 # ╚══════════════════════════════════════════════════════════════╝
-with gr.Blocks(theme=gr.themes.Soft(), title="Energy Learning Hub") as demo:
+with gr.Blocks(title="Energy Learning Hub") as demo:
 
     gr.Markdown(
         "# 🌍 Energy Learning Hub\n"
@@ -446,5 +474,6 @@ if __name__ == "__main__":
     demo.launch(
         server_name="0.0.0.0",
         server_port=PORT,
-        share=False
+        share=False,
+        theme=gr.themes.Soft()
     )
