@@ -2,6 +2,8 @@
 
 A RAG-powered energy education platform with tiered FAQ pathways, Gemini/Qwen auto-fallback, and an interactive Gradio UI.
 
+Presentation deck on this Energy Learning Hub [Energy_Learning_Hub_Deck.pptx](https://github.com/spideyeng/EnergyLearningHub/blob/7bc919632e4772c91fad32defac25805b04f4725/presentation/Energy_Learning_Hub_Deck.pptx)
+
 ---
 
 ## Prerequisites
