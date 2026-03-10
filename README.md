@@ -48,7 +48,7 @@ git push -u origin main
 
 | Setting          | Value                             |
 |------------------|-----------------------------------|
-| **Name**         | `energylearninghub`             |
+| **Name**         | `energylearninghub`               |
 | **Region**       | Singapore (closest to you)        |
 | **Branch**       | `main`                            |
 | **Runtime**      | Docker                            |
@@ -165,4 +165,4 @@ pip install -r requirements.txt
 python app.py
 ```
 
-The app opens at `http://localhost:7860`.
+The app opens at `http://localhost:10000`.
